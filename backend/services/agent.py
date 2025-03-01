@@ -9,7 +9,8 @@ class YoutubeService:
         self.browser = Browser(
             config=BrowserConfig(
                 chrome_instance_path=os.getenv('CHROME_PATH'),
-                persistent_context=True  # Keep the browser context alive
+                headless=False, 
+                disable_security=True,
             )
         )
         
@@ -17,6 +18,14 @@ class YoutubeService:
             model='gemini-2.0-flash-exp',
             api_key=os.getenv('GEMINI_API_KEY')
         )
+        
+        self.context = None  # Will store our browser context
+
+    async def ensure_context(self):
+        """Ensure we have a valid browser context"""
+        if not self.context:
+            self.context = await self.browser.new_context()
+        return self.context
 
     async def process_search_query(self, user_request: str) -> str:
         """Use LLM to extract the most relevant search terms from the user's request."""
@@ -38,8 +47,7 @@ class YoutubeService:
         youtube_task = f"""
         Follow these steps precisely:
         1. If there's a YouTube video already playing:
-           - Look for the search icon in the top left or top of the page
-           - Click it to get to the search interface
+           - Skip step 2 and start from step 3, clicking the search bar at the top of the page
         2. If not already on YouTube:
            - Navigate to https://www.youtube.com
         3. Click the search bar at the top of the page
@@ -47,14 +55,15 @@ class YoutubeService:
         5. From the search results:
            - Look for a video that best matches the requested type
            - Click on the video to play it
-        6. Wait for the video to start playing
-        7. Click on the full screen button
+        6. Click on the full screen button
         """
 
+        # Get browser context and create agent
+        context = await self.ensure_context()
         agent = Agent(
             task=youtube_task,
             llm=self.llm,
-            browser=self.browser
+            browser_context=context  # Use the persistent context
         )
 
         try:
@@ -86,6 +95,8 @@ class YoutubeService:
     async def close_browser(self):
         """Close the browser instance."""
         try:
+            if self.context:
+                await self.context.close()
             await self.browser.close()
         except Exception:
             pass
